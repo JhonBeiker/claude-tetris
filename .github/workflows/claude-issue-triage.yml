@@ -1,0 +1,136 @@
+name: Claude Issue Triage
+
+on:
+  issues:
+    types: [opened, edited]
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write      # Necesario para asignar labels y publicar comentarios
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Issue Triage
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+
+          # Permite solo los comandos gh necesarios para el triaje
+          claude_args: '--allowed-tools Bash(gh:*)'
+
+          prompt: |
+            Eres un asistente de triaje automático para el repositorio **claude-tetris**,
+            un juego de Tetris implementado con HTML, CSS y JavaScript puro (sin frameworks).
+
+            Se acaba de crear o editar el Issue #${{ github.event.issue.number }}.
+            Evento: ${{ github.event_name }} / ${{ github.event.action }}
+
+            ## Arquitectura del proyecto (para contextualizar el diagnóstico)
+            - `index.html` — Estructura DOM: canvas del tablero (300×600 px), canvas de
+              pieza siguiente (120×120 px), panel lateral con score/lines/level, overlay
+              para PAUSE y GAME OVER.
+            - `style.css` — Estética dark/retro con flexbox y backdrop-filter.
+            - `game.js` — Toda la lógica del juego (~300 líneas). Funciones clave:
+              collide(), rotateCW(), tryRotate(), ghostY(), lockPiece(), clearLines(), loop(), init().
+              Constantes: COLS/ROWS/BLOCK, LINE_SCORES, velocidad de caída.
+
+            ---
+
+            ## PASO 1: Leer el Issue
+
+            Ejecuta el siguiente comando para obtener el contenido completo del Issue:
+
+            ```
+            gh issue view ${{ github.event.issue.number }} --json number,title,body,labels,comments
+            ```
+
+            ---
+
+            ## PASO 2: Asignar Labels
+
+            **IMPORTANTE**: Solo puedes usar labels del siguiente set fijo. No inventes ni
+            uses labels que no estén en esta lista:
+
+            | Label           | Cuándo usarlo                                            | Color   |
+            |-----------------|----------------------------------------------------------|---------|
+            | bug             | Comportamiento incorrecto o error en el juego            | #d73a4a |
+            | enhancement     | Mejora o nueva funcionalidad solicitada                  | #a2eeef |
+            | gameplay        | Afecta mecánicas de juego (rotación, colisiones, puntos) | #0075ca |
+            | ui              | Afecta la interfaz visual o estilos                      | #e4e669 |
+            | performance     | Problemas de rendimiento o fluidez                       | #008672 |
+            | documentation   | Relacionado con documentación o comentarios de código    | #0052cc |
+            | question        | Pregunta o solicitud de aclaración                       | #d876e3 |
+            | needs-info      | Falta información para reproducir o entender el Issue    | #fef2c0 |
+            | good first issue| Tarea sencilla ideal para nuevos contribuidores          | #7057ff |
+
+            Para cada label que vayas a aplicar:
+            a. Verifica si existe en el repo:
+               ```
+               gh label list --json name --limit 50
+               ```
+            b. Si el label NO existe, créalo (usa exactamente el nombre y color de la tabla):
+               ```
+               gh label create "NOMBRE_LABEL" --color "COLOR_HEX" --description "DESCRIPCION"
+               ```
+            c. Aplica entre 1 y 3 labels relevantes al Issue:
+               ```
+               gh issue edit ${{ github.event.issue.number }} --add-label "label1,label2"
+               ```
+
+            ---
+
+            ## PASO 3: Publicar Diagnóstico General
+
+            Si el evento es `edited`: primero comprueba si ya existe un comentario previo
+            de diagnóstico automático (busca en los comentarios el texto
+            "🔍 Diagnóstico General del Problema"). Si existe, añade igualmente un
+            comentario nuevo (no repitas información idéntica; enfócate en qué cambió).
+
+            Publica un comentario en el Issue usando este formato exacto (en español):
+
+            ```
+            gh issue comment ${{ github.event.issue.number }} --body "CONTENIDO_DEL_COMENTARIO"
+            ```
+
+            El comentario debe seguir esta estructura:
+
+            ---
+            ## 🔍 Diagnóstico General del Problema
+
+            **📋 Resumen del problema**
+            [Descripción concisa y clara del problema o solicitud reportada]
+
+            **📁 Componente/Archivo probablemente afectado**
+            - `ARCHIVO.ext` — [razón por la que este archivo está implicado]
+
+            **🔎 Causa raíz hipotética**
+            [Análisis técnico de la posible causa basado en la arquitectura del proyecto.
+            Referencia funciones específicas de game.js si aplica.]
+
+            **🛠️ Pasos sugeridos para la solución**
+            1. [Paso concreto 1]
+            2. [Paso concreto 2]
+            3. [Paso concreto N]
+
+            **🎯 Nivel de confianza:** Alto / Medio / Bajo
+            > [Justificación breve: cuánta información tiene el Issue, qué tan clara es la
+            > descripción, si se necesita más información para un diagnóstico preciso]
+
+            ---
+            *🤖 Triaje automático generado por Claude · Labels asignados: [lista de labels aplicados]*
+            ---
+
+            Sé preciso, técnico y útil. El diagnóstico debe servir como base para que un
+            desarrollador pueda implementar la solución directamente.
+
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
