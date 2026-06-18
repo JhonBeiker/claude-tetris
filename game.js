@@ -13,7 +13,20 @@ const COLORS = [
   '#e57373', // Z - red
   '#64b5f6', // J - pale blue
   '#ffb74d', // L - orange
+  '#f5f5f5', // 8 - comodín (Tinte)
 ];
+
+const WILDCARD = 8;
+const POWERUP_SCORE_STEP = 500;
+const POWERUP_COLOR = '#ffd700';
+const POWERUP_ICONS = {
+  bomb: '💣',
+  lightning: '⚡',
+  dye: '🎨',
+  gravity: '⬇️',
+  freeze: '❄️',
+};
+const POWERUP_TYPES = Object.keys(POWERUP_ICONS);
 
 const PIECES = [
   null,
@@ -40,8 +53,10 @@ const overlayTitle = document.getElementById('overlay-title');
 const overlayScore = document.getElementById('overlay-score');
 const restartBtn = document.getElementById('restart-btn');
 const themeToggle = document.getElementById('theme-toggle');
+const freezeIndicator = document.getElementById('freeze-indicator');
 
 let board, current, next, score, lines, level, paused, gameOver, lastTime, dropAccum, dropInterval, animId;
+let nextPowerUpScore, freezeUntil;
 
 function gridLineColor() {
   return getComputedStyle(document.body).getPropertyValue('--grid-line').trim() || '#22222e';
@@ -127,7 +142,84 @@ function clearLines() {
     level = Math.floor(lines / 10) + 1;
     dropInterval = Math.max(100, 1000 - (level - 1) * 90);
     updateHUD();
+    maybePromoteNextToPowerUp();
   }
+}
+
+// Cada POWERUP_SCORE_STEP puntos, la pieza en cola ("next") se convierte
+// en power-up; un while cubre el caso de saltar varios umbrales de golpe.
+function maybePromoteNextToPowerUp() {
+  let promoted = false;
+  while (score >= nextPowerUpScore) {
+    next.power = POWERUP_TYPES[Math.floor(Math.random() * POWERUP_TYPES.length)];
+    nextPowerUpScore += POWERUP_SCORE_STEP;
+    promoted = true;
+  }
+  if (promoted) drawNext();
+}
+
+function powerUpCenter(piece) {
+  const cx = piece.x + Math.floor(piece.shape[0].length / 2);
+  const cy = piece.y + Math.floor(piece.shape.length / 2);
+  return {
+    cx: Math.min(Math.max(cx, 0), COLS - 1),
+    cy: Math.min(Math.max(cy, 0), ROWS - 1),
+  };
+}
+
+function applyBomb(piece) {
+  const { cx, cy } = powerUpCenter(piece);
+  for (let r = cy - 1; r <= cy + 1; r++) {
+    if (r < 0 || r >= ROWS) continue;
+    for (let c = cx - 1; c <= cx + 1; c++) {
+      if (c < 0 || c >= COLS) continue;
+      board[r][c] = 0;
+    }
+  }
+}
+
+function applyLightning(piece) {
+  const { cx, cy } = powerUpCenter(piece);
+  for (let c = 0; c < COLS; c++) board[cy][c] = 0;
+  for (let r = 0; r < ROWS; r++) board[r][cx] = 0;
+  score += 50 * level;
+}
+
+function applyDye() {
+  const present = new Set();
+  for (let r = 0; r < ROWS; r++)
+    for (let c = 0; c < COLS; c++)
+      if (board[r][c]) present.add(board[r][c]);
+  if (!present.size) return;
+  const colors = [...present];
+  const target = colors[Math.floor(Math.random() * colors.length)];
+  for (let r = 0; r < ROWS; r++)
+    for (let c = 0; c < COLS; c++)
+      if (board[r][c] === target) board[r][c] = WILDCARD;
+}
+
+function applyGravity() {
+  for (let c = 0; c < COLS; c++) {
+    const colVals = [];
+    for (let r = 0; r < ROWS; r++) if (board[r][c]) colVals.push(board[r][c]);
+    const padded = new Array(ROWS - colVals.length).fill(0).concat(colVals);
+    for (let r = 0; r < ROWS; r++) board[r][c] = padded[r];
+  }
+}
+
+function applyFreeze() {
+  freezeUntil = performance.now() + 5000;
+}
+
+function applyPowerUp(piece) {
+  switch (piece.power) {
+    case 'bomb': applyBomb(piece); break;
+    case 'lightning': applyLightning(piece); break;
+    case 'dye': applyDye(); break;
+    case 'gravity': applyGravity(); break;
+    case 'freeze': applyFreeze(); break;
+  }
+  updateHUD();
 }
 
 function ghostY() {
@@ -140,6 +232,8 @@ function hardDrop() {
   const gy = ghostY();
   score += (gy - current.y) * 2;
   current.y = gy;
+  updateHUD();
+  maybePromoteNextToPowerUp();
   lockPiece();
 }
 
@@ -148,13 +242,18 @@ function softDrop() {
     current.y++;
     score += 1;
     updateHUD();
+    maybePromoteNextToPowerUp();
   } else {
     lockPiece();
   }
 }
 
 function lockPiece() {
-  merge();
+  if (current.power) {
+    applyPowerUp(current);
+  } else {
+    merge();
+  }
   clearLines();
   spawn();
 }
@@ -174,9 +273,9 @@ function updateHUD() {
   levelEl.textContent = level;
 }
 
-function drawBlock(context, x, y, colorIndex, size, alpha) {
+function drawBlock(context, x, y, colorIndex, size, alpha, colorOverride) {
   if (!colorIndex) return;
-  const color = COLORS[colorIndex];
+  const color = colorOverride || COLORS[colorIndex];
   context.globalAlpha = alpha ?? 1;
   context.fillStyle = color;
   context.fillRect(x * size + 1, y * size + 1, size - 2, size - 2);
@@ -184,6 +283,16 @@ function drawBlock(context, x, y, colorIndex, size, alpha) {
   context.fillStyle = 'rgba(255,255,255,0.12)';
   context.fillRect(x * size + 1, y * size + 1, size - 2, 4);
   context.globalAlpha = 1;
+}
+
+function drawPieceIcon(context, piece, offsetX, offsetY, size) {
+  if (!piece.power) return;
+  const cx = (offsetX + piece.shape[0].length / 2) * size;
+  const cy = (offsetY + piece.shape.length / 2) * size;
+  context.font = `${Math.floor(size * 0.9)}px sans-serif`;
+  context.textAlign = 'center';
+  context.textBaseline = 'middle';
+  context.fillText(POWERUP_ICONS[piece.power], cx, cy);
 }
 
 function drawGrid() {
@@ -214,15 +323,18 @@ function draw() {
 
   // ghost
   const gy = ghostY();
+  const ghostColor = current.power ? POWERUP_COLOR : null;
   for (let r = 0; r < current.shape.length; r++)
     for (let c = 0; c < current.shape[r].length; c++)
       if (current.shape[r][c])
-        drawBlock(ctx, current.x + c, gy + r, current.shape[r][c], BLOCK, 0.2);
+        drawBlock(ctx, current.x + c, gy + r, current.shape[r][c], BLOCK, 0.2, ghostColor);
 
   // current piece
+  const pieceColor = current.power ? POWERUP_COLOR : null;
   for (let r = 0; r < current.shape.length; r++)
     for (let c = 0; c < current.shape[r].length; c++)
-      drawBlock(ctx, current.x + c, current.y + r, current.shape[r][c], BLOCK);
+      drawBlock(ctx, current.x + c, current.y + r, current.shape[r][c], BLOCK, 1, pieceColor);
+  drawPieceIcon(ctx, current, current.x, current.y, BLOCK);
 }
 
 function drawNext() {
@@ -231,9 +343,11 @@ function drawNext() {
   const shape = next.shape;
   const offX = Math.floor((4 - shape[0].length) / 2);
   const offY = Math.floor((4 - shape.length) / 2);
+  const nextColor = next.power ? POWERUP_COLOR : null;
   for (let r = 0; r < shape.length; r++)
     for (let c = 0; c < shape[r].length; c++)
-      drawBlock(nextCtx, offX + c, offY + r, shape[r][c], NB);
+      drawBlock(nextCtx, offX + c, offY + r, shape[r][c], NB, 1, nextColor);
+  drawPieceIcon(nextCtx, next, offX, offY, NB);
 }
 
 function endGame() {
@@ -262,13 +376,17 @@ function loop(ts) {
   if (gameOver || paused) return;
   const dt = ts - lastTime;
   lastTime = ts;
-  dropAccum += dt;
-  if (dropAccum >= dropInterval) {
-    dropAccum = 0;
-    if (!collide(current.shape, current.x, current.y + 1)) {
-      current.y++;
-    } else {
-      lockPiece();
+  const frozen = ts < freezeUntil;
+  freezeIndicator.classList.toggle('hidden', !frozen);
+  if (!frozen) {
+    dropAccum += dt;
+    if (dropAccum >= dropInterval) {
+      dropAccum = 0;
+      if (!collide(current.shape, current.x, current.y + 1)) {
+        current.y++;
+      } else {
+        lockPiece();
+      }
     }
   }
   if (gameOver) return; // lockPiece pudo disparar endGame en este tick
@@ -285,6 +403,9 @@ function init() {
   gameOver = false;
   dropInterval = 1000;
   dropAccum = 0;
+  nextPowerUpScore = POWERUP_SCORE_STEP;
+  freezeUntil = 0;
+  freezeIndicator.classList.add('hidden');
   lastTime = performance.now();
   next = randomPiece();
   spawn();

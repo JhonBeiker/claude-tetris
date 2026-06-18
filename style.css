@@ -177,6 +177,29 @@ body {
   border-radius: 4px;
 }
 
+/* ---- Indicador de power-up "Congelar" ---- */
+.freeze-indicator {
+  text-align: center;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: #4dd0e1;
+  background: rgba(77, 208, 225, 0.15);
+  border: 1px solid rgba(77, 208, 225, 0.4);
+  border-radius: 6px;
+  padding: 6px 4px;
+  animation: freeze-pulse 1s ease-in-out infinite;
+}
+
+.freeze-indicator.hidden {
+  display: none;
+}
+
+@keyframes freeze-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
 /* ---- Controles ---- */
 .controls ul {
   list-style: none;
