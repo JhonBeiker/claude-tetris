@@ -259,6 +259,7 @@ function togglePause() {
 }
 
 function loop(ts) {
+  if (gameOver || paused) return;
   const dt = ts - lastTime;
   lastTime = ts;
   dropAccum += dt;
@@ -270,6 +271,7 @@ function loop(ts) {
       lockPiece();
     }
   }
+  if (gameOver) return; // lockPiece pudo disparar endGame en este tick
   draw();
   animId = requestAnimationFrame(loop);
 }
