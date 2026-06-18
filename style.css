@@ -177,6 +177,18 @@ body {
   border-radius: 4px;
 }
 
+.powerup-value {
+  font-size: 14px;
+  letter-spacing: 0;
+  color: var(--value-color);
+  animation: powerup-pulse 1s ease-in-out infinite;
+}
+
+@keyframes powerup-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
 /* ---- Controles ---- */
 .controls ul {
   list-style: none;
